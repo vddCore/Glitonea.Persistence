@@ -6,21 +6,22 @@ using System.Text.Json;
 
 public abstract class SettingsFile
 {
-    public string FilePath { get; protected set; }
+    public string Path { get; protected set; }
 
-    internal SettingsFile(string filePath)
+    internal SettingsFile(string path)
     {
-        FilePath = filePath;
+        Path = path;
     }
 }
 
 public class SettingsFile<T> : SettingsFile, IDisposable
     where T : SettingsObject, new()
 {
+    public bool SaveOnDispose { get; set; } = true;
     public T Settings { get; private set; }
 
-    public SettingsFile(string filePath)
-        : base(filePath)
+    public SettingsFile(string path)
+        : base(path)
     {
         if (!TryLoad(out var settings))
         {
@@ -40,6 +41,31 @@ public class SettingsFile<T> : SettingsFile, IDisposable
         try
         {
             Save(Settings);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void Reset()
+    {
+        if (File.Exists(Path))
+            File.Delete(Path);
+
+        Settings.PropertyChanged -= Settings_PropertyChanged;
+        Settings = new T();
+        Settings.PropertyChanged += Settings_PropertyChanged;
+
+        Save(Settings);
+    }
+
+    public bool TryReset()
+    {
+        try
+        {
+            Reset();
             return true;
         }
         catch
@@ -68,6 +94,19 @@ public class SettingsFile<T> : SettingsFile, IDisposable
         }
     }
 
+    private T Load()
+    {
+        using (var sr = new StreamReader(Path))
+        {
+            var settings = JsonSerializer.Deserialize<T>(sr.ReadToEnd());
+
+            if (settings == null)
+                throw new SettingsException(this, $"Failed to deserialize settings file: {Path}");
+
+            return settings;
+        }
+    }
+
     private bool TryLoad([MaybeNullWhen(false)] out T settings)
     {
         try
@@ -82,28 +121,17 @@ public class SettingsFile<T> : SettingsFile, IDisposable
         }
     }
 
-    private T Load()
-    {
-        using (var sr = new StreamReader(FilePath))
-        {
-            var settings = JsonSerializer.Deserialize<T>(sr.ReadToEnd());
-
-            if (settings == null)
-            {
-                throw new SettingsException(this, $"Failed to deserialize settings file: {FilePath}");
-            }
-
-            return settings;
-        }
-    }
-
     private void Save(T settings)
     {
-        using (var sw = new StreamWriter(FilePath, false))
+        using (var sw = new StreamWriter(Path, false))
         {
-            sw.Write(
-                JsonSerializer.Serialize(settings),
-                new JsonSerializerOptions { WriteIndented = true }
+            sw.AutoFlush = true;
+            
+            sw.WriteLine(
+                JsonSerializer.Serialize(
+                    settings, 
+                    new JsonSerializerOptions { WriteIndented = true }
+                )
             );
         }
     }
@@ -112,5 +140,10 @@ public class SettingsFile<T> : SettingsFile, IDisposable
         => TrySave();
 
     public void Dispose()
-        => Settings.PropertyChanged -= Settings_PropertyChanged;
+    {
+        Settings.PropertyChanged -= Settings_PropertyChanged;
+
+        if (SaveOnDispose)
+            Save();
+    }
 }
