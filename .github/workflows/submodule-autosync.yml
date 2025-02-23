@@ -1,0 +1,36 @@
+name: 'Submodule Autosync Notification'
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  CI_TOKEN: ${{ secrets.GLITONEA_CI_TOKEN }}
+
+jobs:   
+  notify:
+    name: 'Submodule Autosync Notification'
+    runs-on: ubuntu-latest
+      
+    strategy:
+      matrix:
+        subscribers: [vddCore/Glitonea.DesktopApp]
+        branches: [master]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Fetch subscriber(s) workflow ID
+      id: fetch-workflow
+      run: |
+        curl -X GET -H "Authorization: token ${{ env.CI_TOKEN }}" https://api.github.com/repos/${{ matrix.subscribers }}/actions/workflows >> api_response.json
+        WORKFLOW_ID=$(cat api_response.json | jq -r ".workflows[0].id")
+        echo "WORKFLOW_ID=$WORKFLOW_ID" >> $GITHUB_ENV
+        
+    - name: Dispatch Notifications
+      run: |
+        curl -fL --retry 3 -X POST -H "Accept: application/vnd.github.v3+json" -H "Authorization: token ${{ env.CI_TOKEN }}" https://api.github.com/repos/${{ matrix.subscribers }}/actions/workflows/${{ env.WORKFLOW_ID }}/dispatches -d '{"ref":"${{ matrix.branches }}"}'
